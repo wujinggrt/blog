@@ -3,8 +3,9 @@
 
 __author__ = 'wujing'
 
+import sys
 import asyncio
-import logging
+import logging; logging.basicConfig(level=logging.INFO)
 import aiomysql
 
 def log(sql, args = ()):
@@ -26,6 +27,14 @@ async def create_pool(loop, **kw):
         loop = loop
     )
 
+async def destroy_pool():
+    global __pool
+    if __pool is not None:
+        __pool.close()
+        await __pool.wait_closed()
+
+# sql is a str type, args is a list.
+# returns a list type.
 async def select(sql, args, size=None):
     log(sql, args)
     global __pool
@@ -51,6 +60,15 @@ async def execute(sql, args, size=None):
             raise
         return affected
 
+ 
+# 这个函数主要是把查询字段计数 替换成sql识别的?
+# 比如说：insert into  `User` (`password`, `email`, `name`, `id`) values (?,?,?,?)  看到了么 后面这四个问号
+def create_args_string(num):
+    lol=[]
+    for n in range(num):
+        lol.append('?')
+    return (','.join(lol))
+
 class Field(object):
 
     def __init__(self, name, column_type, primary_key, default):
@@ -59,15 +77,24 @@ class Field(object):
         self.primary_key = primary_key
         self.default = default
 
+    def __str__(self):
+        # 返回 表名字 字段名 和字段类型
+        return "<%s , %s , %s>" %(self.__class__.__name__, self.name, self.column_type)
+
 class IntegerField(Field):
 
-    def __init__(self, name = None, name = None, column_type = 'bigint', primary_key = False, default = None):
+    def __init__(self, name = None, column_type = 'int', primary_key = False, default = None):
         super().__init__(name, column_type, primary_key, default)
 
 class StringField(Field):
 
     def __init__(self, name = None, primary_key = False, default = None, ddf = 'varchar(100)'):
         super().__init__(name, ddf, primary_key, default)
+
+class FloatField(Field):
+
+    def __init__(self, name=None, column_type='float', primary_key=False,default=0.0):
+        super().__init__(name, column_type, primary_key, default)
 
 class ModelMetaclass(type):
 
@@ -76,18 +103,21 @@ class ModelMetaclass(type):
         if name == 'Model':
             return type.__new__(cls, name, bases, attrs)
         # get table name
+        # __table__ is defined in subclass User as a class field.
         table_name = attrs.get('__table__', None) or name
         logging.info('found model: %s (table: %s)' % (name, table_name))
         # get all the Field and primary_key
         mappings = dict()
+        # all keys but primary key
         fields = []
         primary_key = None
+        # key vallue
         for k, v in attrs.items():
             if isinstance(v, Field):
                 logging.info(' found mapping: %s ==> %s' % (k, v))
                 mappings[k] = v
                 if v.primary_key:
-                    # find primary_key
+                    # find more than one primary_key, it should not happened.
                     if primary_key:
                         raise RuntimeError('Duplicate primary key for field: %s' % k)
                     primary_key = k
@@ -107,15 +137,18 @@ class ModelMetaclass(type):
         attrs['__fields__'] = fields
         # construct default SELECT, INSERT, UPDATE and DELETE phrase
         # sql use the `` symbol to sign variable
+        # the later work is to pass parameters to the attrs. These phrase then carries out.
+        # And '?' will be replace
         attrs['__select__'] = 'select `%s`, `%s` from `%s`' % (
                                             primary_key, 
                                             ', '.join(escaped_fields),
                                             table_name
-        )
+                                        )
         attrs['__insert__'] = 'insert into `%s` (%s, `%s`) values (%s)' % (
                                             table_name,
                                             ', '.join(escaped_fields),
                                             primary_key,
+                                            # plus primary key.
                                             create_args_string(len(escaped_fields) + 1)
                                         )
         attrs['__update__'] = 'update `%s` set %s where `%s`=?' % (
@@ -162,7 +195,50 @@ class Model(dict, metaclass = ModelMetaclass):
                 logging.debug('using default value for %s: %s' % (key, str(value)))
                 setattr(self, key, value)
         return value
+
+    @classmethod
+    # 类方法有类变量cls传入，从而可以用cls做一些相关的处理。并且有子类继承时，调用该类方法时，传入的类变量cls是子类，而非父类。
+    async def find_all(cls, where=None, args=None, **kw):
+        sql = [cls.__select__]
+        if where:
+            sql.append('where')
+            sql.append(where)
+        if args is None:
+            args = []
+ 
+        orderBy = kw.get('orderBy', None)
+        if orderBy:
+            sql.append('order by')
+            sql.append(orderBy)
+        # dict 提供get方法 指定放不存在时候返回后学的东西 比如a.get('Fuck',None)
+        limit = kw.get('limit', None)
+        if limit is not None:
+            sql.append('limit')
+            if isinstance(limit, int):
+                sql.append('?')
+                args.append(limit)
+            elif isinstance(limit, tuple) and len(limit) ==2:
+                sql.append('?,?')
+                args.extend(limit)
+            else:
+                raise ValueError('Invalid limit value : %s ' % str(limit))
+ 
+        rs = await select(' '.join(sql),args) #返回的rs是一个元素是tuple的list
+        return [cls(**r) for r in rs]  # **r 是关键字参数，构成了一个cls类的列表，其实就是每一条记录对应的类实例
     
+    @classmethod
+    @asyncio.coroutine
+    def findNumber(cls, selectField, where=None, args=None):
+        '''find number by select and where.'''
+        sql = ['select %s __num__ from `%s`' %(selectField, cls.__table__)]
+        if where:
+            sql.append('where')
+            sql.append(where)
+        rs = yield from select(' '.join(sql), args, 1)
+        if len(rs) == 0:
+            return None
+        return rs[0]['__num__']
+
     @classmethod
     async def find(cls, pk):
         'find object by primary key.'
@@ -176,6 +252,22 @@ class Model(dict, metaclass = ModelMetaclass):
             return None
         return cls(**rs[0])
 
+    @classmethod
+    @asyncio.coroutine
+    def findAll(cls, **kw):
+        rs = []
+        if len(kw) == 0:
+            rs = yield from select(cls.__select__, None)
+        else:
+            args=[]
+            values=[]
+            for k, v in kw.items():
+                args.append('%s=?' % k )
+                values.append(v)
+            print('%s where %s ' % (cls.__select__,  ' and '.join(args)), values)
+            rs = yield from select('%s where %s ' % (cls.__select__,  ' and '.join(args)), values)
+        return rs
+    
     async def save(self):
         args = list(
             map(
@@ -188,8 +280,47 @@ class Model(dict, metaclass = ModelMetaclass):
         if rows != 1:
             logging.warn('failed to insert record: affected rows: %s' % rows)
 
-class User(Model):
-    __table__ = 'user'
+    async def update(self):
+        args = list(map(self.get_value, self.__fields__))
+        args.append(self.get_value(self.__primary_key__))
+        rows = await execute(self.__update__, args)
+        if rows != 1:
+            logging.warn('failed to update record: affected rows: %s'%rows)
 
-    id = IntegerField(primary_key = True)
-    name = StringField()
+    async def delete(self):
+        args = [self.get_value(self.__primary_key__)]
+        rows = await execute(self.__delete__, args)
+        if rows != 1:
+            logging.warn('failed to delete by primary key: affected rows: %s' %rows)
+
+if __name__ == '__main__':
+    # each user is a new object.
+    class User(Model):
+        __table__ = 'user'
+
+        # id = IntegerField(primary_key = True)
+        # name = StringField()
+
+        id = IntegerField('id',primary_key=True) #主键为id， tablename为User，即类名
+        name = StringField('name')
+        email = StringField('email')
+        password = StringField('password')
+
+    loop = asyncio.get_event_loop()
+
+    # create instance
+    async def test():
+        await create_pool(
+            loop = loop, 
+            host = 'localhost', 
+            port = 9000,
+            user = 'root',
+            password = 'wujing',
+            db = 'test'
+        )
+        user = User(id=2, name='Tom', email='slysly759@gmail.com', password='12345')
+        r = await User.findAll()
+        print(r)
+        await destroy_pool()
+        
+    loop.
