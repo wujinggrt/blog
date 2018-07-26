@@ -15,12 +15,12 @@ async def create_pool(loop, **kw):
     logging.info('create database connection pool...')
     global __pool
     __pool = await aiomysql.create_pool(
-        host = kw.get('host', 'lochalhost'),
+        host = kw.get('host', 'localhost'),
         port = kw.get('port', 3306),
         user = kw['user'],
         password = kw['password'],
         db = kw['db'],
-        charset = kw.get('charset', 'utf=8'),
+        charset = kw.get('charset', 'utf8'),
         autocommit = kw.get('autocommit', True),
         maxsize = kw.get('maxsize', 10),
         minsize = kw.get('minsize', 1),
@@ -88,12 +88,22 @@ class IntegerField(Field):
 
 class StringField(Field):
 
-    def __init__(self, name = None, primary_key = False, default = None, ddf = 'varchar(100)'):
-        super().__init__(name, ddf, primary_key, default)
+    def __init__(self, name = None, column_type='varchar(100)', primary_key = False, default = None):
+        super().__init__(name, column_type, primary_key, default)
+
+class BooleanField(Field):
+
+    def __init__(self, name=None, column_type='Boolean', primary_key=False, default=None):
+        super().__init__(name, column_type, primary_key, default)
 
 class FloatField(Field):
 
-    def __init__(self, name=None, column_type='float', primary_key=False,default=0.0):
+    def __init__(self, name=None, column_type='float', primary_key=False, default=None):
+        super().__init__(name, column_type, primary_key, default)
+
+class TextField(Field):
+
+    def __init__(self, name=None, column_type='text', primary_key=None, default=None):
         super().__init__(name, column_type, primary_key, default)
 
 class ModelMetaclass(type):
@@ -112,6 +122,7 @@ class ModelMetaclass(type):
         fields = []
         primary_key = None
         # key vallue
+        # save keys and fields in __fields__ but subclass
         for k, v in attrs.items():
             if isinstance(v, Field):
                 logging.info(' found mapping: %s ==> %s' % (k, v))
@@ -182,10 +193,14 @@ class Model(dict, metaclass = ModelMetaclass):
 
     def __setattr__(self, key, value):
         self[key] = value
-
+        
+    # key-value type as arguments pass to this class type object,
+    # then return it's values by this methods.
     def get_value(self, key):
         return getattr(self, key, None)
-
+        
+    # fields in Object Field,
+    # such like created_at, user_id
     def get_value_or_default(self, key):
         value = getattr(self, key, None)
         if value is None:
@@ -251,22 +266,6 @@ class Model(dict, metaclass = ModelMetaclass):
         if len(rs) == 0:
             return None
         return cls(**rs[0])
-
-    @classmethod
-    @asyncio.coroutine
-    def findAll(cls, **kw):
-        rs = []
-        if len(kw) == 0:
-            rs = yield from select(cls.__select__, None)
-        else:
-            args=[]
-            values=[]
-            for k, v in kw.items():
-                args.append('%s=?' % k )
-                values.append(v)
-            print('%s where %s ' % (cls.__select__,  ' and '.join(args)), values)
-            rs = yield from select('%s where %s ' % (cls.__select__,  ' and '.join(args)), values)
-        return rs
     
     async def save(self):
         args = list(
@@ -309,18 +308,20 @@ if __name__ == '__main__':
     loop = asyncio.get_event_loop()
 
     # create instance
-    async def test():
+    async def test(loop):
         await create_pool(
             loop = loop, 
-            host = 'localhost', 
-            port = 9000,
+            host = '127.0.0.1', 
+            port = 3306,
             user = 'root',
             password = 'wujing',
             db = 'test'
         )
-        user = User(id=2, name='Tom', email='slysly759@gmail.com', password='12345')
-        r = await User.findAll()
+        user = User(id=2, name='Tom', email='wujing@gmail.com', password='12345')
+        await user.save()
+        r = await user.find(2)
         print(r)
         await destroy_pool()
-        
-    loop.
+
+    loop.run_until_complete(test(loop))
+    loop.close()
