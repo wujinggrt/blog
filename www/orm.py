@@ -8,8 +8,8 @@ import asyncio
 import logging; logging.basicConfig(level=logging.INFO)
 import aiomysql
 
-def log(sql, args = ()):
-    logging.info('SQL: %s' % sql)
+def log(sql, args = None):
+    logging.info('SQL: %s, args: %s' % (sql, args or 'No params'))
 
 async def create_pool(loop, **kw):
     logging.info('create database connection pool...')
@@ -150,7 +150,8 @@ class ModelMetaclass(type):
         # sql use the `` symbol to sign variable
         # the later work is to pass parameters to the attrs. These phrase then carries out.
         # And '?' will be replace
-        attrs['__select__'] = 'select `%s`, `%s` from `%s`' % (
+        # the second %s dose not use `` because escaped_fields (escqped means ``) are all surrounded by ``.
+        attrs['__select__'] = 'select `%s`, %s from `%s`' % (
                                             primary_key, 
                                             ', '.join(escaped_fields),
                                             table_name
@@ -193,7 +194,7 @@ class Model(dict, metaclass = ModelMetaclass):
 
     def __setattr__(self, key, value):
         self[key] = value
-        
+
     # key-value type as arguments pass to this class type object,
     # then return it's values by this methods.
     def get_value(self, key):
@@ -257,6 +258,11 @@ class Model(dict, metaclass = ModelMetaclass):
     @classmethod
     async def find(cls, pk):
         'find object by primary key.'
+        print('%s where `%s`=%s' % (
+                            cls.__select__, 
+                            cls.__primary_key__,
+                            pk)
+                            )
         rs = await select('%s where `%s`=?' % (
                             cls.__select__, 
                             cls.__primary_key__),

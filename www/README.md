@@ -54,6 +54,12 @@ sudo service mysql restart
 ```
 it works fine.
 
+#### trick
+```py
+escaped_fields = list(map(lambda f: '`%s`' % f, fields))
+```
+make every element in list be `str` type.
+
 #### problem on create_pool
 pymysql.err.OperationalError: (2003, "Can't connect to MySQL server on '127.0.0.1'")    
 raise OSError(err, 'Connect call failed %s' % (address,))  
@@ -90,8 +96,12 @@ wujing@ubuntu:~/Desktop/wujinggrt/www$
 ```
 it works.  
 
-#### models done
-results:
+#### models done, debug with sql
+results:  
+**save:**  
+```py
+await u.save()
+```
 ```sh
 wujing@ubuntu:~/Desktop/wujinggrt/www$ python3 test_orm.py 
 INFO:root:found model: User (table: users)
@@ -123,3 +133,32 @@ INFO:root:create database connection pool...
 INFO:root:SQL: insert into `users` (`email`, `password`, `admin`, `name`, `image`, `created_at`, `id`) values (?,?,?,?,?,?,?)
 ```
     
+**find:**  
+```py
+rs = await u.find(pk = '123')
+print(rs)   
+```
+```sh
+pymysql.err.ProgrammingError: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '`, `password`, `admin`, `name`, `image`, `created_at`` from `users` where `id`='' at line 1")
+```
+```sql
+mysql> select `id`, ``email`, `password`, `admin`, `name`, `image`, `created_at`` from `users` where `id`=123
+    -> ;
+ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '`, `password`, `admin`, `name`, `image`, `created_at`` from `users` where `id`=1' at line 1
+mysql> 
+```
+key *email* and *created_at*, the initial and last one, symbol ` duplicated.  
+I modified this phrase:  
+```py
+# before
+ attrs['__select__'] = 'select `%s`, `%s` from `%s`' % (...
+ # after
+  attrs['__select__'] = 'select `%s`, %s from `%s`' % (
+# the second %s dose not use `` because escaped_fields (escqped means ``) are all surrounded by ``.
+# Then, it works.  
+```sh
+INFO:root:rows returned: 1
+{'id': '123', 'email': 'test@qq.com', 'password': '123456', 'admin': 0, 'name': 'Test', 'image': 'about:blank', 'created_at': 1532618545.51945}
+```
+Then checks rest of method(update, delete).  
+Same as Blog, Comment.  

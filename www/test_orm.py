@@ -1,3 +1,5 @@
+'test code'
+
 import asyncio
 import orm
 
@@ -20,7 +22,8 @@ async def test(loop):
         image = 'about:blank',
         admin = False
     )
-    await u.save()
+    rs = await u.find(pk = '123')
+    print(rs)
     await orm.destroy_pool()
 
 loop = asyncio.get_event_loop()
