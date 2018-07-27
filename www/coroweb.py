@@ -45,6 +45,7 @@ def post(path):
         return wrapper
     return decorator
 
+# args is str type.
 def get_required_kw_args(fn):
     args = []
     params = inspect.signature(fn).parameters

@@ -1,278 +1,203 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-
-import asyncio, os, inspect, logging
-
-# 高阶函数模块, 提供常用的高阶函数, 如wraps
-import functools
-
-from urllib import parse
-
+# logging模块定义了一些函数和模块，可以帮助我们对一个应用程序或库实现一个灵活的事件日志处理系统
+# logging模块可以纪录错误信息，并在错误信息记录完后继续执行
+import logging
+# 设置logging的默认level为INFO
+# 日志级别大小关系为：CRITICAL > ERROR > WARNING > INFO > DEBUG > NOTSET
+logging.basicConfig(level=logging.INFO)
+# asyncio 内置了对异步IO的支持
+import asyncio
+# os模块提供了调用操作系统的接口函数
+import os
+# json模块提供了Python对象到Json模块的转换
+import json
+# time模块提供各种操作时间的函数
+import time
+# datetime是处理日期和时间的标准库
+from datetime import datetime
+# aiohttp是基于asyncio实现的http框架
 from aiohttp import web
+# Jinja2 是仿照 Django 模板的 Python 前端引擎模板
+# Environment指的是jinjia2模板的配置环境，FileSystemLoader是文件系统加载器，用来加载模板路径
+from jinja2 import Environment, FileSystemLoader
+import orm
+from coroweb import add_routes, add_static
 
-# apis.py是自己定义的
-from apis import APIError
-
-
-# 这是个装饰器，在handlers模块中被引用，其作用是给http请求添加请求方法和请求路径这两个属性
-# 装饰器可以详见之前的教程
-# 这是个三层嵌套的decorator（装饰器），目的是可以在decorator本身传入参数
-# 这个装饰器将一个函数映射为一个URL处理函数
-def get(path):
-    '''
-    Define decorator @get('/path')
-    '''
-    def decorator(func):   # 传入参数是函数
-        # python内置的functools.wraps装饰器作用是把装饰后的函数的__name__属性变为原始的属性
-        # 因为当使用装饰器后，函数的__name__属性会变为wrapper
-        @functools.wraps(func)
-        def wrapper(*args, **kw):
-            return func(*args, **kw)
-        wrapper.__method__ = 'GET'	# 给原始函数添加请求方法 “GET”
-        wrapper.__route__ = path	# 给原始函数添加请求路径 path
-        return wrapper
-    return decorator
-# 这样，一个函数通过@get(path)的装饰就附带了URL信息
-
-def post(path):
-    '''
-    Define decorator @post('/path')
-    '''
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kw):
-            return func(*args, **kw)
-        wrapper.__method__ = 'POST'
-        wrapper.__route__ = path
-        return wrapper
-    return decorator
-
-# 函数的参数fn本身就是个函数，下面五个函数是针对fn函数的参数做一些处理判断
-# 关于其中涉及inspect模块的内容我专门写了一篇博客，如有不懂可以查看
-# http://blog.csdn.net/weixin_35955795/article/details/53053762
-
-# 这个函数将得到fn函数中的没有默认值的关键词参数的元组
-def get_required_kw_args(fn):
-    args = []
-    params = inspect.signature(fn).parameters
-    for name, param in params.items():
-        if param.kind == inspect.Parameter.KEYWORD_ONLY and param.default == inspect.Parameter.empty:
-            args.append(name)
-    return tuple(args)
-
-# 这个函数将得到fn函数中的关键词参数的元组
-def get_named_kw_args(fn):
-    args = []
-    params = inspect.signature(fn).parameters
-    for name, param in params.items():
-        if param.kind == inspect.Parameter.KEYWORD_ONLY:
-            args.append(name)
-    return tuple(args)
-
-# 判断fn有没有关键词参数，如果有就输出True
-def has_named_kw_args(fn):
-    params = inspect.signature(fn).parameters
-    for name, param in params.items():
-        if param.kind == inspect.Parameter.KEYWORD_ONLY:
-            return True
-
-# 判断fn有没有可变的关键词参数（**），如果有就输出True
-def has_var_kw_arg(fn):
-    params = inspect.signature(fn).parameters
-    for name, param in params.items():
-        if param.kind == inspect.Parameter.VAR_KEYWORD:
-            return True
-    
-#判断fn的参数中有没有参数名为request的参数
-def has_request_arg(fn):
-    # 这里是把之前函数的一句语句拆分为两句，拆分原因是后面要使用中间量sig
-    sig = inspect.signature(fn)
-    params = sig.parameters
-    found = False  # 这个函数默认输出没有参数名为request的参数
-    for name, param in params.items():
-        if name == 'request':
-            found = True
-            continue  # 下面的代码不执行，直接进入下一个循环
-        # 如果找到了request参数，又找到了其他参数是POSITIONAL_OR_KEYWORD（不是VAR_POSITIONAL、KEYWORD_ONLY、VAR_KEYWORD参数）
-        # request参数必须是最后一个位置和关键词参数
-        if found and (param.kind != inspect.Parameter.VAR_POSITIONAL and param.kind != inspect.Parameter.KEYWORD_ONLY and param.kind != inspect.Parameter.VAR_KEYWORD):
-            raise ValueError('request parameter must be the last named parameter in function: %s%s' % (fn.__name__, str(sig)))
-    return found
+from handlers import cookie2user, COOKIE_NAME
 
 
-# 定义RequestHandler类，封装url处理函数
-# RequestHandler的目的是从url函数中分析需要提取的参数,从request中获取必要的参数
-# 调用url参数，将结果转换位web.response
-# fn就是handler中的函数
-class RequestHandler(object):
 
-    #初始化自身的属性
-    def __init__(self, app, fn):
-        self._app = app
-        self._func = fn
-        # 下面的属性是对传入的fn的参数的一些判断
-        self._has_request_arg = has_request_arg(fn)
-        self._has_var_kw_arg = has_var_kw_arg(fn)
-        self._has_named_kw_args = has_named_kw_args(fn)
-        self._named_kw_args = get_named_kw_args(fn)
-        self._required_kw_args = get_required_kw_args(fn)
-        
-    # 定义__call__参数后，其实例可以被视为函数
-    # 此处参数为request
-    async def __call__(self, request):
-        kw = None    # 假设不存在关键字参数
-        # 如果fn的参数有可变的关键字参数或关键字参数
-        if self._has_var_kw_arg or self._has_named_kw_args or self._required_kw_args:
+# 这个函数的功能是初始化jinja2模板，配置jinja2的环境
+def init_jinja2(app, **kw):
+    logging.info('init jinja2...')
+    # 设置解析模板需要用到的环境变量
+    options = dict(
+        autoescape = kw.get('autoescape', True),  # 自动转义xml/html的特殊字符
+        # 下面两句的意思是{%和%}中间的是python代码而不是html
+        block_start_string = kw.get('block_start_string', '{%'),  # 设置代码起始字符串
+        block_end_string = kw.get('block_end_string', '%}'),  # 设置代码的终止字符串
+        variable_start_string = kw.get('variable_start_string', '{{'),  # 这两句分别设置了变量的起始和结束字符串
+        variable_end_string = kw.get('variable_end_string', '}}'),  # 就是说{{和}}中间是变量，看过templates目录下的test.html文件后就很好理解了
+        auto_reload = kw.get('auto_reload', True)  # 当模板文件被修改后，下次请求加载该模板文件的时候会自动加载修改后的模板文件
+    )
+    path = kw.get('path', None)  # 从kw中获取模板路径，如果没有传入这个参数则默认为None
+    # 如果path为None，则将当前文件所在目录下的templates目录设为模板文件目录
+    if path is None:
+        # os.path.abspath(__file__)取当前文件的绝对目录
+        # os.path.dirname()取绝对目录的路径部分
+        # os.path.join(path， name)把目录和名字组合
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+    logging.info('set jinja2 template path: %s' % path)
+    # loader=FileSystemLoader(path)指的是到哪个目录下加载模板文件， **options就是前面的options
+    env = Environment(loader=FileSystemLoader(path), **options)
+    filters = kw.get('filters', None)  # fillters=>过滤器
+    if filters is not None:
+        for name, f in filters.items():
+            env.filters[name] = f  # 在env中添加过滤器
+    app['__templating__'] = env  # 前面已经把jinjia2的环境配置都赋值给env了，这里再把env存入app的dict中，这样app就知道要去哪找模板，怎么解析模板
 
-            # http method为post的处理
-            if request.method == 'POST':
-                # content_type是request提交的消息主体类型，没有就返回丢失消息主体类型
-                if not request.content_type:
-                    return web.HTTPBadRequest('Missing Content-Type.')
-                # 把request.content_type转化为小写
-                ct = request.content_type.lower()
-                # application/json表示消息主体是序列化后的json字符串
-                if ct.startswith('application/json'):
-                    params = await request.json()  # 用json方法读取信息
-                    if not isinstance(params, dict):  # 如果读取出来的信息类型不是dict
-                        # 那json对象一定有问题
-                        return web.HTTPBadRequest('JSON body must be object.')
-                    kw = params  # 把读取出来的dict复制给kw
-                # 以下2种content type都表示消息主体是表单
-                elif ct.startswith('application/x-www-form-urlencoded') or ct.startswith('multipart/form-data'):
-                    # request.post方法从request body读取POST参数,即表单信息,并包装成字典赋给kw变量
-                    params = await request.post()
-                    kw = dict(**params)
-                else:  # post的消息主体既不是json对象，又不是浏览器表单，那就只能返回不支持该消息主体类型
-                    return web.HTTPBadRequest('Unsupported Content-Type: %s' % request.content_type)
+# 这个函数的作用就是当http请求的时候，通过logging.info输出请求的信息，其中包括请求的方法和路径
+async def logger_factory(app, handler):
+    async def logger(request):
+        logging.info('Request: %s %s' % (request.method, request.path))
+        # await asyncio.sleep(0.3)
+        return (await handler(request))
+    return logger
 
-            # http method为get的处理 
-            if request.method == 'GET':
-                # request.query_string表示url中的查询字符串
-                # 比如我百度ReedSun，得到网址为https://www.baidu.com/s?ie=UTF-8&wd=ReedSun
-                # 其中‘ie=UTF-8&wd=ReedSun’就是查询字符串
-                qs = request.query_string
-                if qs:
-                    kw = dict()
-                    # parse.parse_qs(qs, keep_blank_values=False, strict_parsing=False)函数的作用是解析一个给定的字符串
-                    # keep_blank_values默认为False，指示是否忽略空白值，True不忽略，False忽略
-                    # strict_parsing如果是True，遇到错误是会抛出ValueError错误，如果是False会忽略错误
-                    # 这个函数将返回一个字典，其中key是等号之前的字符串，value是等号之后的字符串但会是列表
-                    # 比如上面的例子就会返回{'ie': ['UTF-8'], 'wd': ['ReedSun']}
-                    for k, v in parse.parse_qs(qs, True).items():
-                        kw[k] = v[0]
+# 这个函数在day10中定义
+# 这个middlewares的作用是在处理请求之前，先将cookie解析出来，并将登陆用户绑定到request对象上
+# 以后的每个请求，都是在这个middle之后处理的，都已经绑定了用户信息
+@asyncio.coroutine
+def auth_factory(app, handler):
+    @asyncio.coroutine
+    def auth(request):
+        logging.info('check user: %s %s' % (request.method, request.path))
+        request.__user__ = None  # 先把请求的__user__属性绑定None
+        cookie_str = request.cookies.get(COOKIE_NAME)  # 通过cookie名取得加密cookie字符串，COOKIE_NAME是在headlers模块中定义的
+        if cookie_str:
+            user = yield from cookie2user(cookie_str)  # 验证cookie，并得到用户信息
+            if user:
+                logging.info('set current user: %s' % user.email)
+                request.__user__ = user  # 将用户信息绑定到请求上
+        # 如果请求路径是管理页面，但是用户不是管理员，将重定向到登陆页面
+        if request.path.startswith('/manage/') and (request.__user__ is None or not request.__user__.admin):
+            return web.HTTPFound('/signin')
+        return (yield from handler(request))
+    return auth
 
-        # 如果经过以上处理 kw是None，即上面if语句块没有被执行
-        # 则获取请求的abstract math info(抽象数学信息),并以字典形式存入kw
-        # match_info主要是保存像@get('/blog/{id}')里面的id，就是路由路径里的参数
-        if kw is None:
-            kw = dict(**request.match_info)
-        else:
-            # 如果经过以上处理了，kw不为空了，而且没有可变的关键字参数，但是有关键字参数
-            if not self._has_var_kw_arg and self._named_kw_args:
-                # 下面五行代码的意思是将kw中key为关键字参数的项提取出来保存为新的kw
-                # 即剔除kw中key不是fn的关键字参数的项
-                copy = dict()
-                for name in self._named_kw_args:
-                    if name in kw:
-                        copy[name] = kw[name]
-                kw = copy
-            # 遍历request.match_info(abstract math info),再把abstract math info的值加入kw中
-            # 若其key即存在于abstract math info又存在于kw中,发出重复参数警告
-            for k, v in request.match_info.items():#不懂
-                if k in kw:
-                    logging.warning('Duplicate arg name in named arg and kw args: %s' % k)
-                kw[k] = v
+# 只有当请求方法为POST时这个函数才起作用
+async def data_factory(app, handler):
+    async def parse_data(request):
+        if request.method == 'POST':
+            if request.content_type.startswith('application/json'):
+                request.__data__ = await request.json()
+                logging.info('request json: %s' % str(request.__data__))
+            elif request.content_type.startswith('application/x-www-form-urlencoded'):
+                request.__data__ = await request.post()
+                logging.info('request form: %s' % str(request.__data__))
+        return (await handler(request))
+    return parse_data
 
-        # 如果fn的参数有request，则再给kw中加上request的key和值
-        if self._has_request_arg:
-            kw['request'] = request
-
-        # 如果fn的参数有，没有默认值的关键字参数
-        # 这个if语句块主要是为了检查一下kw
-        if self._required_kw_args:
-            for name in self._required_kw_args:
-                # kw必须包含全部没有默认值的关键字参数，如果发现遗漏则说明有参数没传入，报错
-                if not name in kw:
-                    return web.HTTPBadRequest('Missing argument: %s' % name)
-        # 以上过程即为从request中获得必要的参数，并组成kw
-        # kw的建立过程比较繁琐，我做了一张思维导图，详见本目录下RequestHandler.png
-        
-
-        # 以下调用handler处理，并返回response        
-        logging.info('call with args: %s' % str(kw))
-        try:
-            print("Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-            print(self._func)
-            print(self._func.__name__) 
-            r = await self._func(**kw)  # 执行handler模块里的函数
-            print(r)
+async def response_factory(app, handler):
+    async def response(request):
+        logging.info('Response handler...')
+        r = await handler(request)
+        # 如果相应结果为StreamResponse，直接返回
+        # #treamResponse是aiohttp定义response的基类,即所有响应类型都继承自该类
+        # StreamResponse主要为流式数据而设计
+        if isinstance(r, web.StreamResponse):
             return r
-        except APIError as e:
-            return dict(error=e.error, data=e.data, message=e.message)
-        
-# 向app中添加静态文件目录
-def add_static(app):
-    # os.path.abspath(__file__), 返回当前脚本的绝对路径(包括文件名)
-    # os.path.dirname(), 去掉文件名,返回目录路径
-    # os.path.join(), 将分离的各部分组合成一个路径名
-    # 因此以下操作就是将本文件同目录下的static目录(即www/static/)加入到应用的路由管理器中
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
-    # app = web.Application(loop=loop)这是在app.py模块中定义的
-    app.router.add_static('/static/', path)
-    logging.info('add static %s => %s' % ('/static/', path))
+        # 如果相应结果为字节流，则将其作为应答的body部分，并设置响应类型为流型
+        if isinstance(r, bytes):
+            resp = web.Response(body=r)
+            resp.content_type = 'application/octet-stream'
+            return resp
+        # 如果响应结果为字符串
+        if isinstance(r, str):
+            # 判断响应结果是否为重定向，如果是，返回重定向后的结果
+            if r.startswith('redirect:'):
+                return web.HTTPFound(r[9:])  # 即把r字符串之前的"redirect:"去掉
+            # 然后以utf8对其编码，并设置响应类型为html型
+            resp = web.Response(body=r.encode('utf-8'))
+            resp.content_type = 'text/html;charset=utf-8'
+            return resp
+        # 如果响应结果是字典，则获取他的jinja2模板信息，此处为jinja2.env
+        if isinstance(r, dict):
+            template = r.get('__template__')
+            # 若不存在对应模板，则将字典调整为json格式返回，并设置响应类型为json
+            if template is None:
+                resp = web.Response(body=json.dumps(r, ensure_ascii=False, default=lambda o: o.__dict__).encode('utf-8'))
+                resp.content_type = 'application/json;charset=utf-8'
+                return resp
+            else:
+                r["__user__"] = request.__user__  # 增加__user__,前端页面将依次来决定是否显示评论框
+                resp = web.Response(body=app['__templating__'].get_template(template).render(**r).encode('utf-8'))
+                resp.content_type = 'text/html;charset=utf-8'
+                return resp
+        # 如果响应结果为整数型，且在100和600之间
+        # 则此时r为状态码，即404，500等
+        if isinstance(r, int) and r >= 100 and r < 600:
+            return web.Response(r)
+        # 如果响应结果为长度为2的元组
+        # 元组第一个值为整数型且在100和600之间
+        # 则t为http状态码，m为错误描述，返回状态码和错误描述
+        if isinstance(r, tuple) and len(r) == 2:
+            t, m = r
+            if isinstance(t, int) and t >= 100 and t < 600:
+                return web.Response(t, str(m))
+        # 默认以字符串形式返回响应结果，设置类型为普通文本
+        resp = web.Response(body=str(r).encode('utf-8'))
+        resp.content_type = 'text/plain;charset=utf-8'
+        return resp
+    #上面6个if其实只用到了一个，准确的说只用到了半个。大家可以把用到的代码找出来，把没有用到的注释掉，如果程序能正常运行，那我觉得任务也就完成了
+    #没用到的if语句块了解一下就好，等用到了再回过头来看，你就瞬间理解了。
+    return response
 
-# 把请求处理函数注册到app
-# 处理将针对http method 和path进行
-# 下面的add_routes函数的一部分
-def add_route(app, fn):
-    method = getattr(fn, '__method__', None)  # 获取fn.__method__属性,若不存在将返回None
-    path = getattr(fn, '__route__', None)  # 获取fn.__route__属性,若不存在将返回None
-    if path is None or method is None:  # 如果两个属性其中之一没有值，那就会报错
-        raise ValueError('@get or @post not defined in %s.' % str(fn))
-    # 如果函数fn是不是一个协程或者生成器，就把这个函数编程协程
-    if not asyncio.iscoroutinefunction(fn) and not inspect.isgeneratorfunction(fn):
-        fn = asyncio.coroutine(fn)
-    logging.info('add route %s %s => %s(%s)' % (method, path, fn.__name__, ', '.join(inspect.signature(fn).parameters.keys())))
-    app.router.add_route(method, path, RequestHandler(app, fn))  # 注册request handler
+# 时间过滤器，作用是返回日志创建的时间，用于显示在日志标题下面
+def datetime_filter(t):
+    delta = int(time.time() - t)
+    if delta < 60:
+        return u'1分钟前'
+    if delta < 3600:
+        return u'%s分钟前' % (delta // 60)
+    if delta < 86400:
+        return u'%s小时前' % (delta // 3600)
+    if delta < 604800:
+        return u'%s天前' % (delta // 86400)
+    dt = datetime.fromtimestamp(t)
+    return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
 
 
-    
-# 将handlers模块中所有请求处理函数提取出来交给add_route自动去处理
-def add_routes(app, module_name):
-    # 如果handlers模块在当前目录下，传入的module_name就是handlers
-    # 如果handlers模块在handler目录下没那传入的module_name就是handler.handlers
+# 调用asyncio实现异步IO
+async def init(loop):
+    # 创建数据库连接池
+    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='www', password='www', db='awesome')
+    # 创建app对象，同时传入上文定义的拦截器middlewares
+    app = web.Application(loop=loop, middlewares=[
+        logger_factory, auth_factory, response_factory
+    ])
+    # 初始化jinja2模板，并传入时间过滤器
+    init_jinja2(app, filters=dict(datetime=datetime_filter))
+    # 下面这两个函数在coroweb模块中
+    add_routes(app, 'handlers')  # handlers指的是handlers模块也就是handlers.py
+    add_static(app)
+    srv = await loop.create_server(app.make_handler(), '127.0.0.1', 9000)
+    logging.info('server started at http://127.0.0.1:9000...')
+    return srv
 
-    # Python rfind() 返回字符串最后一次出现的位置，如果没有匹配项则返回-1。
-    # str.rfind(str, beg=0 end=len(string))
-    # str -- 查找的字符串
-    # beg -- 开始查找的位置，默认为0
-    # end -- 结束查找位置，默认为字符串的长度。
-    # 返回字符串最后一次出现的位置(索引数），如果没有匹配项则返回-1。
-    n = module_name.rfind('.')
-    if n == (-1):
-        # __import__(module_name[, globals[, locals[, fromlist]]]) 可选参数默认为globals(),locals(),[]
-        # 例如>>> mod = __import__("test", globals(), locals())
-        #     >>> mod
-        #     <module 'test' from 'C:\\Users\\shabi\\test.py'>
-        mod = __import__(module_name, globals(), locals())
-    else:
-        name = module_name[n+1:]  # 当module_name为handler.handlers时，[n+1:]就是取.后面的部分，也就是handlers
-        # 下面的语句相当于执行了两个步骤，传入的module_name是aaa.bbb
-        # 第一个步骤获取aaa模块的信息
-        # 第二个步骤通过getattr()方法取得子模块名, 如aaa.bbb
-        mod = getattr(__import__(module_name[:n], globals(), locals(), [name]), name)
-    # dir()不带参数时，返回当前范围内的变量、方法和定义的类型列表；带参数时，返回参数的属性、方法列表。如果参数包含方法__dir__()，该方法将被调用。如果参数不包含__dir__()，该方法将最大限度地收集参数信息。
-    for attr in dir(mod):
-        if attr.startswith('_'):
-            continue
-        # 排除私有属性之后，用getattr调用handlers模块离得里的属性（方法）
-        # fn就是handler里的函数
-        fn = getattr(mod, attr)
-        if callable(fn):  # 查看提取出来的属性是不是函数
-            method = getattr(fn, '__method__', None)
-            path = getattr(fn, '__route__', None)
-            # 如果是函数，再判断是否有__method__和__route__属性，如果存在则使用app_route函数注册
-            if method and path:
-                add_route(app, fn)
+
+
+# asyncio的编程模块实际上就是一个消息循环。我们从asyncio模块中直接获取一个eventloop（事件循环）的引用，//
+# 然后把需要执行的协程扔到eventloop中执行，就实现了异步IO
+# 第一步是获取eventloop
+
+# get_event_loop()函数详见python官方文档18.5.2.5
+# get_event_loop() => 获取当前脚本下的事件循环，返回一个event loop对象(这个对象的类型是'asyncio.windows_events._WindowsSelectorEventLoop')，实现AbstractEventLoop（事件循环的基类）接口
+# 如果当前脚本下没有事件循环，将抛出异常，get_event_loop()永远不会抛出None
+loop = asyncio.get_event_loop()
+# 之后是执行curoutine
+loop.run_until_complete(init(loop))
+# 无限循环运行直到stop()
+loop.run_forever()
+
+
+# 测试day13 提升开发效率

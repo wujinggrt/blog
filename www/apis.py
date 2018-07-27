@@ -1,20 +1,3 @@
-Skip to content
- 
-Search or jump to…
-
-Pull requests
-Issues
-Marketplace
-Explore
- @wujinggrt Sign out
-6
-31 16 ReedSun/Preeminent
- Code  Issues 1  Pull requests 0  Projects 0  Wiki  Insights
-Preeminent/www/apis.py
-e5684ff  on 11 Nov 2016
-@ReedSun ReedSun finish day12
-     
-76 lines (62 sloc)  3.07 KB
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -90,16 +73,3 @@ class APIPermissionError(APIError):
     '''
     def __init__(self, message=''):
         super(APIPermissionError, self).__init__('permission:forbidden', 'permission', message)
-© 2018 GitHub, Inc.
-Terms
-Privacy
-Security
-Status
-Help
-Contact GitHub
-API
-Training
-Shop
-Blog
-About
-Press h to open a hovercard with more details.

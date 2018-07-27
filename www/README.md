@@ -197,3 +197,18 @@ wrapper.__route__ = path
 return wrapper
 ```
 add some method to wrapper.  
+
+#### inspect
+from [blogs](https://blog.csdn.net/weixin_35955795/article/details/53053762)
+```py
+# pseudo-code
+def a(a, b=0, *c, d, e=1, **f):
+```
+param.kind, param.default:  
+1. a: POSITIONAL_OR_KEYWORD, <class 'inspect._empty'>  
+2. b: POSITIONAL_OR_KEYWORD, 0
+3. c: VAR_POSITIONAL, <class 'inspect._empty'>
+4. d: KEYWORD_ONLY, <class 'inspect._empty'>  
+5. e: KEYWORD_ONLY, 1
+6. f: VAR_KEYWORD, <class 'inspect._empty'>  
+

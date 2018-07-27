@@ -20,10 +20,10 @@ async def test(loop):
         loop = loop
     )
     u = User(
-        id = '123',
-        name = 'handsome guy',
-        email = 'test@qq.com',
-        password = '123456',
+        id = 'fdsf',
+        name = 'Qi',
+        email = 'Q@gmail.com',
+        password = 'fegfshfd',
         image = 'about:blank',
         admin = False
     )
@@ -38,7 +38,7 @@ async def test(loop):
         content = "hello I'm going to write a long worlds",
     )
     
-    rs = await b.save()
+    rs = await u.save()
     print(rs)
     await orm.destroy_pool()
 
