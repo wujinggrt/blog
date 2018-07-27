@@ -19,11 +19,3 @@ from config import configs
 COOKIE_NAME = 'awesession'  # cookie名，用于设置cookie
 _COOKIE_KEY = configs.session.secret  # cookie密钥，作为加密cookie的原始字符串的一部分
 
-@get('/')
-def index(request):
-    users = yield from User.find_all()
-    return {
-        '__template__': 'test.html',
-        'users': users
-    }
-
