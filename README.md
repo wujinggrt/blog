@@ -1,0 +1,1 @@
+Followed by liaoxuefeng's website, I think I can make a individual website for blog.

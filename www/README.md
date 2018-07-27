@@ -185,3 +185,15 @@ mysql> use wujinggrt;
 mysql> see database;
 mysql> select * from users;
 ```
+
+#### coroweb
+```py
+@functools.wraps(func)
+def wrapper(*args, **kw):
+    return func(*args, **kw)
+# add some method, attrs
+wrapper.__method__ = 'GET'
+wrapper.__route__ = path
+return wrapper
+```
+add some method to wrapper.  

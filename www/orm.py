@@ -3,7 +3,6 @@
 
 __author__ = 'wujing'
 
-import re
 import sys
 import asyncio
 import logging; logging.basicConfig(level=logging.INFO)
