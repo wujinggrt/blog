@@ -3,9 +3,10 @@
 
 __author__ = 'wujing'
 
+import logging; logging.basicConfig(level=logging.INFO)
+
 import sys
 import asyncio
-import logging; logging.basicConfig(level=logging.INFO)
 import aiomysql
 
 def log(sql, args = None):

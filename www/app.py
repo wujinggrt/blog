@@ -13,9 +13,10 @@ import asyncio
 import os
 import json
 import time
-import datetime
 import orm
+import aiomysql
 
+from datetime import datetime
 from aiohttp import web
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
@@ -114,7 +115,7 @@ def datetime_filter(t):
     return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
 
 async def init(loop):
-    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='www', password='www', db='awesome')
+    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='www-data', password='www-data', db='wujinggrt')
     app = web.Application(loop=loop, middlewares=[
         logger_factory, response_factory
     ])

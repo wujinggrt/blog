@@ -20,10 +20,10 @@ async def test(loop):
         loop = loop
     )
     u = User(
-        id = 'fdsf',
-        name = 'Qi',
-        email = 'Q@gmail.com',
-        password = 'fegfshfd',
+        id = 'rewttwf',
+        name = 'Lee',
+        email = 'Lee@gmail.com',
+        password = 'dsashfd',
         image = 'about:blank',
         admin = False
     )
