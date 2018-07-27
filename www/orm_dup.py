@@ -287,7 +287,7 @@ class Model(dict, metaclass = ModelMetaclass):
         if rows != 1:
             logging.warn('failed to insert record: affected rows: %s' % rows)
 
-    async def update_all(self):
+    async def update(self):
         args = list(map(self.get_value, self.__fields__))
         args.append(self.get_value(self.__primary_key__))
         rows = await execute(self.__update__, args)
@@ -295,7 +295,7 @@ class Model(dict, metaclass = ModelMetaclass):
             logging.warn('failed to update record: affected rows: %s'%rows)
 
     # update some of rows
-    async def update(self):
+    async def update_some(self):
         # get the valid args
         # dict store by hash, so it is not always in order.
         # each time field(key) replace in sql, corresponding values store in list,

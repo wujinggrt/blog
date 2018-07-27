@@ -97,6 +97,8 @@ wujing@ubuntu:~/Desktop/wujinggrt/www$
 it works.  
 
 #### models done, debug with sql
+
+##### save
 results:  
 **save:**  
 ```py
@@ -133,7 +135,7 @@ INFO:root:create database connection pool...
 INFO:root:SQL: insert into `users` (`email`, `password`, `admin`, `name`, `image`, `created_at`, `id`) values (?,?,?,?,?,?,?)
 ```
     
-**find:**  
+##### find
 ```py
 rs = await u.find(pk = '123')
 print(rs)   
@@ -162,3 +164,24 @@ INFO:root:rows returned: 1
 ```
 Then checks rest of method(update, delete).  
 Same as Blog, Comment.  
+
+##### delete
+```sh
+INFO:root:SQL: delete from `users` where `id`=?, args: ['123']
+None
+```
+
+##### update
+more comlicated.  default value will be set as None, it is not allowed in mysql.  
+To select them out, or rewrittes sql.  
+Rewrite an update_some method to perform incompletable update.  
+But I think this feature can be added into update by if and else.
+
+#### mysql
+use database_name; --change database
+
+```mysql
+mysql> use wujinggrt;
+mysql> see database;
+mysql> select * from users;
+```
