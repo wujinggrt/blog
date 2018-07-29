@@ -37,8 +37,7 @@ def index(request):
         'blogs': blogs
     }
 
-@asyncio.coroutine
-def cookie2user(cookie_str):
+async def cookie2user(cookie_str):
     '''
     Parse cookie and load user if cookie is valid.
     '''
@@ -51,7 +50,7 @@ def cookie2user(cookie_str):
         uid, expires, sha1 = L
         if int(expires) < time.time():
             return None
-        user = yield from User.find(uid)
+        user = await User.find(uid)
         if user is None:
             return None
         s = '%s-%s-%s-%s' % (uid, user.password, expires, _COOKIE_KEY)
@@ -85,12 +84,12 @@ def signout(request):
     return r
     
 @post('/api/authenticate')
-def authenticate(*, email, password):
+async def authenticate(*, email, password):
     if not email:
         raise APIValueError('email', 'Invalid email.')
     if not password:
         raise APIValueError('password', 'Invalid password.')
-    users = yield from User.find_all('email=?', [email])
+    users = await User.find_all('email=?', [email])
     if len(users) == 0:
         raise APIValueError('email', 'Email not exist.')
     user = users[0]
