@@ -19,7 +19,7 @@ async def create_pool(loop, **kw):
         host = kw.get('host', 'localhost'),
         port = kw.get('port', 3306),
         user = kw['user'],
-        password = kw['password'],
+        password = kw['password'],    
         db = kw['db'],
         charset = kw.get('charset', 'utf8'),
         autocommit = kw.get('autocommit', True),
